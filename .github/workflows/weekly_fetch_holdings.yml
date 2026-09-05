@@ -2,6 +2,8 @@ name: 每週抓取集保股權分散表並分析
 
 on:
   schedule:
+    # UTC 週六 02:00 = 台北時間週六 10:00
+    # 集保股權分散表通常週六上午更新完成，抓太早可能拿到上週舊資料
     - cron: "0 2 * * 6"
   workflow_dispatch:
 
@@ -29,12 +31,15 @@ jobs:
       - name: 分析週增排行與續買/回頭車分類
         run: python analyze_holdings.py
 
-      - name: 把新資料與報表存回 GitHub
+      - name: 更新資料清單
+        run: python build_manifest.py
 
+      - name: 把新資料與報表存回 GitHub
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/holdings/
           git add reports/ 2>/dev/null || true
+          git add docs/manifest.json
           git diff --staged --quiet || git commit -m "自動更新集保週資料：$(date +'%Y-%m-%d')"
           git push
