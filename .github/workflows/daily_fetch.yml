@@ -2,7 +2,10 @@ name: 每日抓取證交所資料
 
 on:
   schedule:
+    # UTC 08:00 = 台北時間 16:00，週一到週五執行
+    # （證交所收盤後資料通常要 14:30~15:00 後才會更新完整，16:00 抓最保險）
     - cron: "0 8 * * 1-5"
+  # 允許在 GitHub 網頁上手動點按鈕觸發，方便測試
   workflow_dispatch:
 
 permissions:
@@ -26,11 +29,13 @@ jobs:
       - name: 執行抓取程式
         run: python fetch_data.py
 
+      - name: 更新資料清單
+        run: python build_manifest.py
+
       - name: 把新資料存回 GitHub
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add data/
+          git add data/ docs/manifest.json
           git diff --staged --quiet || git commit -m "自動更新資料：$(date +'%Y-%m-%d')"
           git push
