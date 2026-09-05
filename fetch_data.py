@@ -61,8 +61,19 @@ def fetch_institutional_flow(date_str: str) -> pd.DataFrame | None:
     params = {"date": date_str, "selectType": "ALL", "response": "json"}
 
     resp = requests.get(url, params=params, headers=HEADERS, timeout=15)
-    resp.raise_for_status()
-    payload = resp.json()
+
+    if resp.status_code != 200:
+        print(f"[三大法人] HTTP狀態碼異常：{resp.status_code}")
+        print(f"回應內容前200字：{resp.text[:200]}")
+        return None
+
+    try:
+        payload = resp.json()
+    except requests.exceptions.JSONDecodeError:
+        print("[三大法人] 回應不是有效的JSON，可能被證交所擋掉了（常見於雲端伺服器IP）")
+        print(f"HTTP狀態碼：{resp.status_code}")
+        print(f"回應內容前200字：{resp.text[:200]!r}")
+        return None
 
     if payload.get("stat") != "OK" or not payload.get("data"):
         print(f"[三大法人] {date_str} 沒有資料（可能是非交易日）")
@@ -95,8 +106,19 @@ def fetch_daily_price() -> pd.DataFrame | None:
     params = {"response": "json"}
 
     resp = requests.get(url, params=params, headers=HEADERS, timeout=15)
-    resp.raise_for_status()
-    payload = resp.json()
+
+    if resp.status_code != 200:
+        print(f"[個股日成交] HTTP狀態碼異常：{resp.status_code}")
+        print(f"回應內容前200字：{resp.text[:200]}")
+        return None
+
+    try:
+        payload = resp.json()
+    except requests.exceptions.JSONDecodeError:
+        print("[個股日成交] 回應不是有效的JSON，可能被證交所擋掉了（常見於雲端伺服器IP）")
+        print(f"HTTP狀態碼：{resp.status_code}")
+        print(f"回應內容前200字：{resp.text[:200]!r}")
+        return None
 
     if not payload.get("data"):
         print("[個股日成交] 沒有資料")
