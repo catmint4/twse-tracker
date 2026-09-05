@@ -9,6 +9,7 @@
 
 import requests
 import pandas as pd
+import io
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import os
@@ -101,6 +102,9 @@ def fetch_daily_price() -> pd.DataFrame | None:
     """
     抓取全部上市股票「當日」成交資訊。
     這支 API 沒有 date 參數，永遠回傳最近一個交易日的資料。
+
+    注意：證交所這支 API 有時候即使指定 response=json，
+    仍會回傳 CSV 格式的文字內容（欄位是中文），這裡做雙重解析、互相備援。
     """
     url = "https://www.twse.com.tw/exchangeReport/STOCK_DAY_ALL"
     params = {"response": "json"}
@@ -112,26 +116,45 @@ def fetch_daily_price() -> pd.DataFrame | None:
         print(f"回應內容前200字：{resp.text[:200]}")
         return None
 
+    df = None
+
     try:
         payload = resp.json()
+        if payload.get("data"):
+            df = pd.DataFrame(payload["data"], columns=payload["fields"])
+        else:
+            print("[個股日成交] JSON格式正常，但沒有資料（可能是非交易日）")
+            return None
     except requests.exceptions.JSONDecodeError:
-        print("[個股日成交] 回應不是有效的JSON，可能被證交所擋掉了（常見於雲端伺服器IP）")
-        print(f"HTTP狀態碼：{resp.status_code}")
-        print(f"回應內容前200字：{resp.text[:200]!r}")
-        return None
+        # 退而求其次：證交所這次回傳的其實是CSV格式文字，改用CSV方式解析
+        print("[個股日成交] 回應不是JSON格式，改嘗試用CSV格式解析...")
+        try:
+            df = pd.read_csv(io.StringIO(resp.text))
+        except Exception as e:
+            print(f"[個股日成交] CSV解析也失敗：{e}")
+            print(f"回應內容前200字：{resp.text[:200]!r}")
+            return None
 
-    if not payload.get("data"):
+        df.columns = [str(c).strip() for c in df.columns]
+        rename_map = {
+            "日期": "Date", "證券代號": "Code", "證券名稱": "Name",
+            "成交股數": "TradeVolume", "成交金額": "TradeValue",
+            "開盤價": "OpeningPrice", "最高價": "HighestPrice", "最低價": "LowestPrice",
+            "收盤價": "ClosingPrice", "漲跌價差": "Change", "成交筆數": "Transaction",
+        }
+        df = df.rename(columns=rename_map)
+
+    if df is None or df.empty:
         print("[個股日成交] 沒有資料")
         return None
-
-    df = pd.DataFrame(payload["data"], columns=payload["fields"])
 
     numeric_cols = [
         "TradeVolume", "TradeValue", "OpeningPrice",
         "HighestPrice", "LowestPrice", "ClosingPrice", "Transaction",
     ]
     for col in numeric_cols:
-        df[col] = df[col].apply(to_int)
+        if col in df.columns:
+            df[col] = df[col].apply(to_int)
 
     return df
 
