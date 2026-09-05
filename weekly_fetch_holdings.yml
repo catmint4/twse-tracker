@@ -1,0 +1,39 @@
+name: 每週抓取集保股權分散表並分析
+
+on:
+  schedule:
+    - cron: "0 2 * * 6"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fetch_and_analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 取出程式碼
+        uses: actions/checkout@v4
+
+      - name: 設定 Python 環境
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安裝套件
+        run: pip install -r requirements.txt
+
+      - name: 抓取集保股權分散表
+        run: python fetch_holdings.py
+
+      - name: 分析週增排行與續買/回頭車分類
+        run: python analyze_holdings.py
+
+      - name: 把新資料與報表存回 GitHub
+
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/holdings/ reports/
+          git diff --staged --quiet || git commit -m "自動更新集保週資料：$(date +'%Y-%m-%d')"
+          git push
