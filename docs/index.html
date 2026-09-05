@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>台股籌碼追蹤儀表板</title>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #12151c;
+    --panel-2: #161a23;
+    --border: #262b36;
+    --text: #eef0f4;
+    --muted: #8b93a3;
+    --accent: #5b8cff;
+    --accent-2: #8b5cf6;
+    --red: #ff6b6b;
+    --green: #2dd4bf;
+    --radius: 16px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background:
+      radial-gradient(1200px 600px at 10% -10%, #16233d 0%, transparent 60%),
+      radial-gradient(1000px 500px at 90% 0%, #241a3a 0%, transparent 55%),
+      var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", "PingFang TC", "Noto Sans TC", sans-serif;
+    margin: 0;
+    padding: 32px 24px 60px;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+
+  header { margin-bottom: 28px; }
+  h1 {
+    font-size: 26px; margin: 0 0 6px; font-weight: 700;
+    background: linear-gradient(90deg, #8fb3ff, #c9a8ff);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    display: inline-block;
+  }
+  .subtitle { color: var(--muted); font-size: 13px; }
+
+  .stat-row { display: flex; gap: 12px; margin: 18px 0 8px; flex-wrap: wrap; }
+  .stat-pill {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 999px; padding: 8px 16px; font-size: 12.5px; color: var(--muted);
+  }
+  .stat-pill b { color: var(--text); font-weight: 600; }
+
+  .panel {
+    background: linear-gradient(180deg, var(--panel), var(--panel-2));
+    border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 22px 24px; margin-bottom: 22px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  h2 { font-size: 15.5px; margin: 0; display: flex; align-items: center; gap: 8px; }
+  h2 .icon { font-size: 18px; }
+  .badge {
+    font-size: 11px; color: var(--muted); border: 1px solid var(--border);
+    border-radius: 6px; padding: 3px 8px;
+  }
+
+  .query-row { display: flex; gap: 10px; margin-bottom: 4px; }
+  input {
+    background: #0f1218; border: 1px solid var(--border); color: var(--text);
+    padding: 10px 14px; border-radius: 10px; font-size: 14px;
+    flex: 1; max-width: 220px; outline: none; transition: border-color 0.15s;
+  }
+  input:focus { border-color: var(--accent); }
+  button {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    border: none; color: white; padding: 10px 20px; border-radius: 10px;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+    transition: transform 0.1s, opacity 0.15s;
+  }
+  button:hover { opacity: 0.92; transform: translateY(-1px); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    color: var(--muted); font-weight: 500; text-align: right; padding: 8px 10px;
+    border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--panel-2);
+  }
+  thead th:first-child, tbody td:first-child { text-align: left; }
+  tbody td {
+    padding: 9px 10px; text-align: right;
+    border-bottom: 1px solid rgba(255,255,255,0.04); font-variant-numeric: tabular-nums;
+  }
+  tbody tr:hover { background: rgba(255,255,255,0.025); }
+  .table-scroll { max-height: 420px; overflow-y: auto; border-radius: 10px; }
+  .stock-code { color: var(--accent); font-weight: 600; }
+
+  .pos { color: var(--red); font-weight: 600; }
+  .neg { color: var(--green); font-weight: 600; }
+
+  .status { color: var(--muted); font-size: 12.5px; margin-top: 10px; display: flex; align-items: center; gap: 8px; }
+  .spinner {
+    width: 13px; height: 13px; border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .tag {
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px;
+    border-radius: 8px; font-size: 12.5px; font-weight: 600; margin-bottom: 10px;
+  }
+  .tag-buy { background: rgba(255,107,107,0.12); color: var(--red); }
+  .tag-sell { background: rgba(45,212,191,0.12); color: var(--green); }
+  .tag-count { opacity: 0.7; font-weight: 400; }
+
+  .empty-hint { color: var(--muted); font-size: 13.5px; line-height: 1.8; padding: 20px 4px; }
+  .empty-hint .big { font-size: 28px; display: block; margin-bottom: 8px; }
+
+  .chart-wrap { position: relative; height: 260px; }
+  .chart-wrap.tall { height: 340px; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .sub-panel {
+    background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px;
+  }
+  .sub-panel h3 { font-size: 13px; color: var(--muted); margin: 0 0 10px; font-weight: 500; }
+
+  @media (max-width: 760px) {
+    .grid-2 { grid-template-columns: 1fr; }
+    input { max-width: none; }
+  }
+
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 30px; }
+  footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>📊 台股籌碼追蹤儀表板</h1>
+  <div class="subtitle" id="lastUpdated">載入中...</div>
+  <div class="stat-row" id="statRow"></div>
+</header>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2><span class="icon">🔍</span>個股籌碼與股價</h2>
+  </div>
+  <div class="query-row">
+    <input id="stockInput" placeholder="輸入股票代號，例如 2330" value="2330" />
+    <button id="queryBtn">查詢</button>
+  </div>
+  <div class="status" id="flowStatus"></div>
+
+  <div class="grid-2" style="margin-top:18px;">
+    <div class="sub-panel">
+      <h3>本週籌碼結構（集保週資料，百分點 pp）</h3>
+      <div class="chart-wrap"><canvas id="holdingsBarChart"></canvas></div>
+    </div>
+    <div class="sub-panel">
+      <h3>近5個交易日三大法人買賣超（張）</h3>
+      <div class="chart-wrap"><canvas id="institBarChart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="sub-panel" style="margin-top:16px;">
+    <h3>股價走勢（近30個交易日，紅漲綠跌，含 MA5 / MA10 / MA20）</h3>
+    <div class="chart-wrap tall"><canvas id="priceChart"></canvas></div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2><span class="icon">🏦</span>大戶籌碼排行</h2>
+    <span class="badge" id="top50Badge"></span>
+  </div>
+  <div id="top50Container"><div class="empty-hint">載入中...</div></div>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2><span class="icon">🔄</span>續買 / 回頭車 / 下車 / 續賣</h2>
+    <span class="badge" id="turnoverBadge"></span>
+  </div>
+  <div id="turnoverContainer"><div class="empty-hint">載入中...</div></div>
+</div>
+
+<footer>
+  資料來源：證交所 T86 / STOCK_DAY_ALL、集保結算所股權分散表　｜　
+  <a href="https://github.com/catmint4/twse-tracker" target="_blank">查看原始碼</a>　｜　
+  尚未包含融資融券（融資增減、券資比）
+</footer>
+
+</div>
+
+<script>
+const OWNER = "catmint4";
+const REPO = "twse-tracker";
+const RAW_BASE = `https://raw.githubusercontent.com/${OWNER}/${REPO}/main/`;
+const BIG_HOLDER_TIERS = new Set(["12", "13", "14", "15"]);
+const THOUSAND_LOT_TIERS = new Set(["15"]);
+const RETAIL_TIERS = new Set(["1","2","3","4","5","6","7","8","9","10","11"]);
+
+let manifest = null;
+let holdingsBarChart = null;
+let institBarChart = null;
+let priceChart = null;
+
+async function fetchCSV(path) {
+  const res = await fetch(RAW_BASE + path, { cache: "no-store" });
+  if (!res.ok) throw new Error(`無法讀取 ${path}（HTTP ${res.status}）`);
+  const text = await res.text();
+  const parsed = Papa.parse(text, { header: true, dynamicTyping: false, skipEmptyLines: true });
+  return parsed.data;
+}
+
+function toNumber(v) {
+  if (typeof v === "number") return v;
+  if (typeof v === "string") return parseFloat(v.replace(/,/g, "")) || 0;
+  return 0;
+}
+
+function loadingHTML(text) { return `<span class="spinner"></span>${text}`; }
+
+async function loadManifest() {
+  const res = await fetch("manifest.json?_=" + Date.now(), { cache: "no-store" });
+  manifest = await res.json();
+
+  const lastInst = manifest.institutional_dates.at(-1) || "—";
+  const lastHold = manifest.holdings_dates.at(-1) || "—";
+  document.getElementById("lastUpdated").textContent =
+    `最新法人資料：${lastInst}　｜　最新集保週資料：${lastHold}`;
+
+  document.getElementById("statRow").innerHTML = `
+    <div class="stat-pill">交易日資料累積 <b>${manifest.institutional_dates.length}</b> 天</div>
+    <div class="stat-pill">集保週資料累積 <b>${manifest.holdings_dates.length}</b> 週</div>
+    <div class="stat-pill">週增排行 <b>${manifest.top50_reports.length ? "已可查看" : "尚未產生"}</b></div>
+    <div class="stat-pill">換手分類 <b>${manifest.turnover_reports.length ? "已可查看" : "尚未產生"}</b></div>
+  `;
+}
+
+// ---------- 個股籌碼結構（大戶/散戶，來自集保週資料） ----------
+
+function tierPercents(rows, stockId) {
+  let big = 0, thousand = 0, retail = 0;
+  for (const r of rows) {
+    if (String(r["證券代號"] ?? "").trim() !== stockId) continue;
+    const tier = String(r["持股分級"] ?? "").trim();
+    const pct = toNumber(r["占集保庫存數比例%"]);
+    if (BIG_HOLDER_TIERS.has(tier)) big += pct;
+    if (THOUSAND_LOT_TIERS.has(tier)) thousand += pct;
+    if (RETAIL_TIERS.has(tier)) retail += pct;
+  }
+  return { big, thousand, retail };
+}
+
+async function drawHoldingsBarChart(stockId) {
+  const weeks = manifest.holdings_dates.slice(-2); // 最新兩週(如果有)
+  if (weeks.length === 0) {
+    if (holdingsBarChart) { holdingsBarChart.destroy(); holdingsBarChart = null; }
+    return "尚無集保週資料";
+  }
+
+  const points = [];
+  for (const w of weeks) {
+    try {
+      const rows = await fetchCSV(`data/holdings/${w}.csv`);
+      points.push({ week: w, ...tierPercents(rows, stockId) });
+    } catch (e) { /* 忽略 */ }
+  }
+  if (points.length === 0) return "讀取失敗";
+
+  const latest = points.at(-1);
+  const prev = points.length >= 2 ? points[points.length - 2] : null;
+
+  const labels = ["大戶比例(≥400張)", "散戶比例(<400張)"];
+  const values = prev
+    ? [latest.big - prev.big, latest.retail - prev.retail]
+    : [latest.big, latest.retail];
+  const isDelta = !!prev;
+
+  if (holdingsBarChart) holdingsBarChart.destroy();
+  const ctx = document.getElementById("holdingsBarChart").getContext("2d");
+  holdingsBarChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: values.map(v => v >= 0 ? "#ff6b6b" : "#2dd4bf"),
+        borderRadius: 6,
+      }],
+    },
+    options: {
+      indexAxis: "y",
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          ticks: { color: "#8b93a3" }, grid: { color: "rgba(255,255,255,0.05)" },
+          title: { display: true, text: isDelta ? "週增減 (pp)" : "目前比例 (%)", color: "#8b93a3" },
+        },
+        y: { ticks: { color: "#c7cbd4" }, grid: { display: false } },
+      },
+    },
+  });
+
+  return isDelta
+    ? `${prev.week} → ${latest.week}　週增減`
+    : `${latest.week}　目前比例（只有1週資料，尚無法比較增減）`;
+}
+
+// ---------- 三大法人買賣超（近5日，張） ----------
+
+async function drawInstitBarChart(stockId) {
+  const dates = manifest.institutional_dates.slice(-5);
+  if (dates.length === 0) {
+    if (institBarChart) { institBarChart.destroy(); institBarChart = null; }
+    return "尚無法人資料";
+  }
+
+  let foreign = 0, trust = 0, dealer = 0, found = 0;
+  for (const d of dates) {
+    try {
+      const rows = await fetchCSV(`data/institutional/${d}.csv`);
+      const row = rows.find(r => String(r["證券代號"]).trim() === stockId);
+      if (row) {
+        foreign += toNumber(row["外資買賣超合計"]);
+        trust += toNumber(row["投信買賣超股數"]);
+        dealer += toNumber(row["自營商買賣超股數"]);
+        found++;
+      }
+    } catch (e) { /* 忽略 */ }
+  }
+  if (found === 0) return `找不到「${stockId}」的法人資料`;
+
+  const labels = ["外資", "投信", "自營商"];
+  const values = [foreign / 1000, trust / 1000, dealer / 1000]; // 股 -> 張
+
+  if (institBarChart) institBarChart.destroy();
+  const ctx = document.getElementById("institBarChart").getContext("2d");
+  institBarChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: values.map(v => v >= 0 ? "#ff6b6b" : "#2dd4bf"),
+        borderRadius: 6,
+      }],
+    },
+    options: {
+      indexAxis: "y",
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          ticks: { color: "#8b93a3" }, grid: { color: "rgba(255,255,255,0.05)" },
+          title: { display: true, text: "近5日合計買賣超（張）", color: "#8b93a3" },
+        },
+        y: { ticks: { color: "#c7cbd4" }, grid: { display: false } },
+      },
+    },
+  });
+
+  return `近 ${found} 個交易日合計`;
+}
+
+// ---------- 股價技術圖（高低區間 + 收盤連線 + MA） ----------
+
+function movingAverage(arr, period) {
+  const result = [];
+  for (let i = 0; i < arr.length; i++) {
+    if (i < period - 1) { result.push(null); continue; }
+    const slice = arr.slice(i - period + 1, i + 1);
+    if (slice.some(v => v === null)) { result.push(null); continue; }
+    result.push(slice.reduce((a, b) => a + b, 0) / period);
+  }
+  return result;
+}
+
+async function drawPriceChart(stockId) {
+  const dates = manifest.price_dates.slice(-30);
+  if (dates.length === 0) {
+    if (priceChart) { priceChart.destroy(); priceChart = null; }
+    return "尚無價格資料";
+  }
+
+  const labels = [];
+  const ranges = [];
+  const closes = [];
+  const colors = [];
+
+  for (const d of dates) {
+    try {
+      const rows = await fetchCSV(`data/prices/${d}.csv`);
+      const row = rows.find(r => String(r["Code"]).trim() === stockId);
+      if (!row) continue;
+      const open = toNumber(row["OpeningPrice"]);
+      const high = toNumber(row["HighestPrice"]);
+      const low = toNumber(row["LowestPrice"]);
+      const close = toNumber(row["ClosingPrice"]);
+      labels.push(d);
+      ranges.push([low, high]);
+      closes.push(close);
+      colors.push(close >= open ? "#ff6b6b" : "#2dd4bf");
+    } catch (e) { /* 忽略 */ }
+  }
+
+  if (labels.length === 0) return `找不到「${stockId}」的價格資料`;
+
+  const ma5 = movingAverage(closes, 5);
+  const ma10 = movingAverage(closes, 10);
+  const ma20 = movingAverage(closes, 20);
+
+  if (priceChart) priceChart.destroy();
+  const ctx = document.getElementById("priceChart").getContext("2d");
+  priceChart = new Chart(ctx, {
+    data: {
+      labels,
+      datasets: [
+        {
+          type: "bar", label: "高低區間", data: ranges,
+          backgroundColor: colors, barPercentage: 0.5, categoryPercentage: 0.8,
+          order: 3,
+        },
+        { type: "line", label: "MA5", data: ma5, borderColor: "#fbbf24", pointRadius: 0, borderWidth: 1.5, tension: 0.2, order: 1 },
+        { type: "line", label: "MA10", data: ma10, borderColor: "#5b8cff", pointRadius: 0, borderWidth: 1.5, tension: 0.2, order: 1 },
+        { type: "line", label: "MA20", data: ma20, borderColor: "#c9a8ff", pointRadius: 0, borderWidth: 1.5, tension: 0.2, order: 1 },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: { legend: { labels: { color: "#c7cbd4" } } },
+      scales: {
+        x: { ticks: { color: "#8b93a3" }, grid: { color: "rgba(255,255,255,0.04)" } },
+        y: { ticks: { color: "#8b93a3" }, grid: { color: "rgba(255,255,255,0.04)" }, title: { display: true, text: "價格", color: "#8b93a3" } },
+      },
+    },
+  });
+
+  return `共 ${labels.length} 個交易日`;
+}
+
+async function queryStock(stockId) {
+  const statusEl = document.getElementById("flowStatus");
+  statusEl.innerHTML = loadingHTML("讀取中...");
+
+  const [holdingsNote, institNote, priceNote] = await Promise.all([
+    drawHoldingsBarChart(stockId),
+    drawInstitBarChart(stockId),
+    drawPriceChart(stockId),
+  ]);
+
+  statusEl.innerHTML = `籌碼結構：${holdingsNote}　｜　法人：${institNote}　｜　股價：${priceNote}`;
+}
+
+// ---------- 大戶籌碼排行（大戶買 / 千張增 / 散戶賣） ----------
+
+function renderNumberCell(v) {
+  const num = toNumber(v);
+  const cls = num > 0 ? "pos" : (num < 0 ? "neg" : "");
+  const sign = num > 0 ? "+" : "";
+  return `<td class="${cls}">${sign}${num.toFixed(2)}</td>`;
+}
+
+async function computeCurrentSnapshotRanking() {
+  const latestDate = manifest.holdings_dates.at(-1);
+  if (!latestDate) return null;
+
+  const rows = await fetchCSV(`data/holdings/${latestDate}.csv`);
+  const totals = {};
+
+  for (const r of rows) {
+    const stockId = String(r["證券代號"] ?? "").trim();
+    const tier = String(r["持股分級"] ?? "").trim();
+    const pct = toNumber(r["占集保庫存數比例%"]);
+    if (!stockId || stockId.startsWith("Y") || tier === "16") continue;
+
+    if (!totals[stockId]) totals[stockId] = { big: 0, thousand: 0, retail: 0 };
+    if (BIG_HOLDER_TIERS.has(tier)) totals[stockId].big += pct;
+    if (THOUSAND_LOT_TIERS.has(tier)) totals[stockId].thousand += pct;
+    if (RETAIL_TIERS.has(tier)) totals[stockId].retail += pct;
+  }
+
+  const list = Object.entries(totals)
+    .map(([stockId, v]) => ({ stockId, ...v }))
+    .sort((a, b) => b.big - a.big);
+
+  return { date: latestDate, list };
+}
+
+async function loadTop50() {
+  const container = document.getElementById("top50Container");
+  const badge = document.getElementById("top50Badge");
+  container.innerHTML = `<div class="status">${loadingHTML("讀取中...")}</div>`;
+
+  const latest = manifest.top50_reports.at(-1);
+
+  if (latest) {
+    badge.textContent = "週增排行";
+    const rows = await fetchCSV(`reports/${latest}.csv`);
+    const top20 = rows.slice(0, 20);
+    let html = `<div class="table-scroll"><table><thead><tr>
+      <th>股票代號</th><th>大戶買</th><th>千張增</th><th>散戶賣</th>
+    </tr></thead><tbody>`;
+    for (const r of top20) {
+      html += `<tr>
+        <td class="stock-code">${r["證券代號"] ?? ""}</td>
+        ${renderNumberCell(r["大戶本週增減"])}
+        ${renderNumberCell(r["千張本週增減"])}
+        ${renderNumberCell(r["散戶本週增減"])}
+      </tr>`;
+    }
+    html += "</tbody></table></div>";
+    container.innerHTML = html;
+    return;
+  }
+
+  const snapshot = await computeCurrentSnapshotRanking();
+  if (!snapshot) {
+    badge.textContent = "尚無資料";
+    container.innerHTML = `<div class="empty-hint">
+      <span class="big">🕒</span>目前還沒有任何集保股權分散表資料，請等待每週六的排程執行。
+    </div>`;
+    return;
+  }
+
+  badge.textContent = `${snapshot.date} 單週快照`;
+  let html = `<div class="empty-hint" style="padding:0 0 14px;">
+    目前只累積了 1 週資料，還無法計算「週增」。以下是 <b>${snapshot.date}</b> 這一週的目前比例（尚無比較基準，僅供參考）。
+  </div>`;
+  html += `<div class="table-scroll"><table><thead><tr>
+    <th>股票代號</th><th>大戶比例</th><th>千張比例</th><th>散戶比例</th>
+  </tr></thead><tbody>`;
+  for (const r of snapshot.list.slice(0, 20)) {
+    html += `<tr>
+      <td class="stock-code">${r.stockId}</td>
+      <td>${r.big.toFixed(2)}%</td>
+      <td>${r.thousand.toFixed(2)}%</td>
+      <td>${r.retail.toFixed(2)}%</td>
+    </tr>`;
+  }
+  html += "</tbody></table></div>";
+  container.innerHTML = html;
+}
+
+async function loadTurnover() {
+  const container = document.getElementById("turnoverContainer");
+  const badge = document.getElementById("turnoverBadge");
+  container.innerHTML = `<div class="status">${loadingHTML("讀取中...")}</div>`;
+
+  const latest = manifest.turnover_reports.at(-1);
+  if (!latest) {
+    const weeksSoFar = manifest.holdings_dates.length;
+    badge.textContent = `還差 ${Math.max(0, 3 - weeksSoFar)} 週`;
+    container.innerHTML = `<div class="empty-hint">
+      <span class="big">⏳</span>
+      目前累積了 <b>${weeksSoFar}</b> 週集保資料，需要滿 <b>3 週</b> 才能分類出續買、回頭車、下車、續賣。
+      請等待每週六排程繼續累積，或用 backfill_holdings.py 手動回補歷史。
+    </div>`;
+    return;
+  }
+
+  badge.textContent = "已產生分類";
+  const rows = await fetchCSV(`reports/${latest}.csv`);
+  const groups = { "續買": [], "回頭車": [], "下車": [], "續賣": [] };
+  for (const r of rows) {
+    const cat = r["分類"];
+    if (groups[cat]) groups[cat].push(r);
+  }
+
+  let html = '<div class="grid-2">';
+  for (const [cat, list] of Object.entries(groups)) {
+    const tagClass = (cat === "續買" || cat === "回頭車") ? "tag-buy" : "tag-sell";
+    html += `<div><div class="tag ${tagClass}">${cat} <span class="tag-count">${list.length}</span></div>`;
+    if (list.length === 0) {
+      html += `<div class="empty-hint" style="padding:4px 0;">本週沒有股票符合這個分類</div></div>`;
+      continue;
+    }
+    html += `<div class="table-scroll"><table><thead><tr>
+      <th>股票代號</th><th>上週</th><th>本週</th>
+    </tr></thead><tbody>`;
+    for (const r of list.slice(0, 15)) {
+      html += `<tr>
+        <td class="stock-code">${r["證券代號"] ?? ""}</td>
+        ${renderNumberCell(r["上週增減"])}
+        ${renderNumberCell(r["本週增減"])}
+      </tr>`;
+    }
+    html += "</tbody></table></div></div>";
+  }
+  html += "</div>";
+  container.innerHTML = html;
+}
+
+document.getElementById("queryBtn").addEventListener("click", () => {
+  const val = document.getElementById("stockInput").value.trim();
+  if (val) queryStock(val);
+});
+document.getElementById("stockInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") document.getElementById("queryBtn").click();
+});
+
+(async function init() {
+  await loadManifest();
+  await loadTop50();
+  await loadTurnover();
+  const defaultStock = document.getElementById("stockInput").value.trim();
+  if (defaultStock) queryStock(defaultStock);
+})();
+</script>
+</body>
+</html>
