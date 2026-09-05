@@ -208,15 +208,16 @@
     <div class="chart-wrap tall"><canvas id="priceChart"></canvas></div>
   </div>
 
-  <div class="grid-2" style="margin-top:16px;">
-    <div class="sub-panel">
-      <h3>每日三大法人買賣超（張，由新到舊，會隨時間累積越來越長）</h3>
-      <div class="chart-wrap" style="height:440px;"><canvas id="institBarChart"></canvas></div>
-    </div>
-    <div class="sub-panel">
-      <h3>每週大戶／散戶比例增減（pp，由新到舊）</h3>
-      <div class="chart-wrap" style="height:440px;"><canvas id="holdingsBarChart"></canvas></div>
-    </div>
+  <div class="sub-panel" style="margin-top:16px;">
+    <h3>籌碼買賣超（與上方股價共用同一條時間軸，由左到右對照）</h3>
+    <div style="margin-bottom:2px;"><span class="badge">外資買賣超(張)</span></div>
+    <div style="height:100px;"><canvas id="foreignBarChart"></canvas></div>
+    <div style="margin:8px 0 2px;"><span class="badge">投信買賣超(張)</span></div>
+    <div style="height:100px;"><canvas id="trustBarChart"></canvas></div>
+    <div style="margin:8px 0 2px;"><span class="badge">自營商買賣超(張)</span></div>
+    <div style="height:100px;"><canvas id="dealerBarChart"></canvas></div>
+    <div style="margin:8px 0 2px;"><span class="badge">大戶比例增減(pp，週資料，時間軸較稀疏)</span></div>
+    <div style="height:110px;"><canvas id="bigHolderBarChart"></canvas></div>
   </div>
 
   <div class="sub-panel" style="margin-top:16px;">
@@ -268,9 +269,11 @@ const RETAIL_TIERS = new Set(["1","2","3","4","5","6","7","8","9","10","11"]);
 const WATCHLIST_KEY = "twse_dashboard_watchlists_v1";
 
 let manifest = null;
-let holdingsBarChart = null;
-let institBarChart = null;
 let priceChart = null;
+let foreignBarChart = null;
+let trustBarChart = null;
+let dealerBarChart = null;
+let bigHolderBarChart = null;
 
 async function fetchCSV(path) {
   const res = await fetch(RAW_BASE + path, { cache: "no-store" });
@@ -486,72 +489,100 @@ function tierPercents(rows, stockId) {
 
 // ---------- 每日三大法人買賣超（橫式長條圖，多日排列） ----------
 
-async function drawInstitDailyBarChart(stockId) {
-  const dates = manifest.institutional_dates.slice(-20);
+async function fetchStockSeries(dates, folder, mapper) {
+  const labels = [];
+  const values = [];
+  for (const d of dates) {
+    try {
+      const rows = await fetchCSV(`${folder}/${d}.csv`);
+      const row = rows.find(r => String(r["證券代號"] ?? r["Code"] ?? "").trim() === mapper.stockId);
+      if (row) {
+        labels.push(d);
+        values.push(mapper.extract(row));
+      }
+    } catch (e) { /* 忽略 */ }
+  }
+  return { labels, values };
+}
+
+function makeBarChart(canvasId, existing, labels, values, options = {}) {
+  if (existing) existing.destroy();
+  const ctx = document.getElementById(canvasId).getContext("2d");
+  return new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: values.map(v => v >= 0 ? "#ff6b6b" : "#2dd4bf"),
+        barPercentage: 0.7,
+        categoryPercentage: 0.9,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          ticks: { display: !!options.showXLabels, color: "#8b93a3", font: { size: 9.5 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 15 },
+          grid: { display: false },
+        },
+        y: {
+          ticks: { color: "#8b93a3", font: { size: 9.5 } },
+          grid: { color: "rgba(255,255,255,0.04)" },
+        },
+      },
+      ...options.overrides,
+    },
+  });
+}
+
+// ---------- 外資／投信／自營商（與股價共用同一組每日日期，直式長條圖上下疊放） ----------
+
+async function drawChipBarPanels(stockId) {
+  const dates = manifest.institutional_dates.slice(-120); // 最多顯示近120個交易日，太多會擠成一片看不清楚
+
   if (dates.length === 0) {
-    if (institBarChart) { institBarChart.destroy(); institBarChart = null; }
+    [foreignBarChart, trustBarChart, dealerBarChart].forEach(c => c && c.destroy());
+    foreignBarChart = trustBarChart = dealerBarChart = null;
     return "尚無法人資料";
   }
 
-  const rowsPerDate = [];
+  const labels = [];
+  const foreignVals = [];
+  const trustVals = [];
+  const dealerVals = [];
+
   for (const d of dates) {
     try {
       const rows = await fetchCSV(`data/institutional/${d}.csv`);
       const row = rows.find(r => String(r["證券代號"]).trim() === stockId);
       if (row) {
-        rowsPerDate.push({
-          date: d,
-          foreign: toNumber(row["外資買賣超合計"]) / 1000,
-          trust: toNumber(row["投信買賣超股數"]) / 1000,
-          dealer: toNumber(row["自營商買賣超股數"]) / 1000,
-        });
+        labels.push(d);
+        foreignVals.push(toNumber(row["外資買賣超合計"]) / 1000);
+        trustVals.push(toNumber(row["投信買賣超股數"]) / 1000);
+        dealerVals.push(toNumber(row["自營商買賣超股數"]) / 1000);
       }
     } catch (e) { /* 忽略 */ }
   }
 
-  if (rowsPerDate.length === 0) return `找不到「${stockId}」的法人資料`;
+  if (labels.length === 0) return `找不到「${stockId}」的法人資料`;
 
-  rowsPerDate.reverse(); // 最新的日期排在圖表最上面
+  foreignBarChart = makeBarChart("foreignBarChart", foreignBarChart, labels, foreignVals, { showXLabels: false });
+  trustBarChart = makeBarChart("trustBarChart", trustBarChart, labels, trustVals, { showXLabels: false });
+  dealerBarChart = makeBarChart("dealerBarChart", dealerBarChart, labels, dealerVals, { showXLabels: true });
 
-  const labels = rowsPerDate.map(r => r.date);
-
-  if (institBarChart) institBarChart.destroy();
-  const ctx = document.getElementById("institBarChart").getContext("2d");
-  institBarChart = new Chart(ctx, {
-    type: "bar",
-    data: {
-      labels,
-      datasets: [
-        { label: "外資", data: rowsPerDate.map(r => r.foreign), backgroundColor: "#5b8cff" },
-        { label: "投信", data: rowsPerDate.map(r => r.trust), backgroundColor: "#fbbf24" },
-        { label: "自營商", data: rowsPerDate.map(r => r.dealer), backgroundColor: "#8b5cf6" },
-      ],
-    },
-    options: {
-      indexAxis: "y",
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { labels: { color: "#c7cbd4" } } },
-      scales: {
-        x: {
-          ticks: { color: "#8b93a3" }, grid: { color: "rgba(255,255,255,0.05)" },
-          title: { display: true, text: "買賣超（張）", color: "#8b93a3" },
-        },
-        y: { ticks: { color: "#c7cbd4", font: { size: 10.5 } }, grid: { display: false } },
-      },
-    },
-  });
-
-  return `近 ${labels.length} 個交易日`;
+  return `共 ${labels.length} 個交易日`;
 }
 
-// ---------- 每週大戶/散戶比例增減（橫式長條圖，多週排列） ----------
+// ---------- 大戶比例增減（週資料，直式長條圖） ----------
 
-async function drawHoldingsWeeklyBarChart(stockId) {
-  const weeks = manifest.holdings_dates.slice(-9); // 最多抓9週，才能畫出8週的週增
-  if (weeks.length === 0) {
-    if (holdingsBarChart) { holdingsBarChart.destroy(); holdingsBarChart = null; }
-    return "尚無集保週資料";
+async function drawBigHolderBarChart(stockId) {
+  const weeks = manifest.holdings_dates.slice(-60);
+  if (weeks.length < 2) {
+    if (bigHolderBarChart) { bigHolderBarChart.destroy(); bigHolderBarChart = null; }
+    return weeks.length === 0 ? "尚無集保週資料" : "僅累積1週，無法算增減";
   }
 
   const points = [];
@@ -561,71 +592,18 @@ async function drawHoldingsWeeklyBarChart(stockId) {
       points.push({ week: w, ...tierPercents(rows, stockId) });
     } catch (e) { /* 忽略 */ }
   }
-  if (points.length === 0) return "讀取失敗";
+  if (points.length < 2) return "讀取失敗";
 
-  if (points.length === 1) {
-    // 只有一週資料，畫不出週增，改顯示目前比例
-    const p = points[0];
-    if (holdingsBarChart) holdingsBarChart.destroy();
-    const ctx = document.getElementById("holdingsBarChart").getContext("2d");
-    holdingsBarChart = new Chart(ctx, {
-      type: "bar",
-      data: {
-        labels: [p.week],
-        datasets: [
-          { label: "大戶比例(%)", data: [p.big], backgroundColor: "#ff6b6b" },
-          { label: "散戶比例(%)", data: [p.retail], backgroundColor: "#2dd4bf" },
-        ],
-      },
-      options: {
-        indexAxis: "y", responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { labels: { color: "#c7cbd4" } } },
-        scales: {
-          x: { ticks: { color: "#8b93a3" }, grid: { color: "rgba(255,255,255,0.05)" }, title: { display: true, text: "目前比例(%)（僅1週，尚無法比較）", color: "#8b93a3" } },
-          y: { ticks: { color: "#c7cbd4" }, grid: { display: false } },
-        },
-      },
-    });
-    return "僅累積1週";
-  }
-
-  // 兩週以上：畫出每週的「週增減」
-  const weekly = [];
+  const labels = [];
+  const values = [];
   for (let i = 1; i < points.length; i++) {
-    weekly.push({
-      week: points[i].week,
-      bigDelta: points[i].big - points[i - 1].big,
-      retailDelta: points[i].retail - points[i - 1].retail,
-    });
+    labels.push(points[i].week);
+    values.push(points[i].big - points[i - 1].big);
   }
-  weekly.reverse(); // 最新的週排在圖表最上面
 
-  const labels = weekly.map(w => w.week);
+  bigHolderBarChart = makeBarChart("bigHolderBarChart", bigHolderBarChart, labels, values, { showXLabels: true });
 
-  if (holdingsBarChart) holdingsBarChart.destroy();
-  const ctx = document.getElementById("holdingsBarChart").getContext("2d");
-  holdingsBarChart = new Chart(ctx, {
-    type: "bar",
-    data: {
-      labels,
-      datasets: [
-        { label: "大戶週增(pp)", data: weekly.map(w => w.bigDelta), backgroundColor: "#ff6b6b" },
-        { label: "散戶週增(pp)", data: weekly.map(w => w.retailDelta), backgroundColor: "#2dd4bf" },
-      ],
-    },
-    options: {
-      indexAxis: "y",
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { labels: { color: "#c7cbd4" } } },
-      scales: {
-        x: { ticks: { color: "#8b93a3" }, grid: { color: "rgba(255,255,255,0.05)" }, title: { display: true, text: "週增減(pp)", color: "#8b93a3" } },
-        y: { ticks: { color: "#c7cbd4" }, grid: { display: false } },
-      },
-    },
-  });
-
-  return `近 ${labels.length} 週`;
+  return `共 ${labels.length} 週`;
 }
 
 // ---------- 今日融資融券 ----------
@@ -748,8 +726,8 @@ async function queryStock(rawInput) {
 
   const [priceNote, institNote, holdingsNote, marginNote] = await Promise.all([
     drawPriceChart(stockId),
-    drawInstitDailyBarChart(stockId),
-    drawHoldingsWeeklyBarChart(stockId),
+    drawChipBarPanels(stockId),
+    drawBigHolderBarChart(stockId),
     drawMarginStats(stockId),
   ]);
 
