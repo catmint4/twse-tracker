@@ -29,6 +29,9 @@ jobs:
       - name: 執行抓取程式
         run: python fetch_data.py
 
+      - name: 抓取融資融券
+        run: python fetch_margin.py
+
       - name: 更新資料清單
         run: python build_manifest.py
 
