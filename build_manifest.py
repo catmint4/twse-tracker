@@ -19,6 +19,7 @@ def main():
     manifest = {
         "institutional_dates": dates_from_dir("data/institutional/*.csv"),
         "price_dates": dates_from_dir("data/prices/*.csv"),
+        "margin_dates": dates_from_dir("data/margin/*.csv"),
         "holdings_dates": dates_from_dir("data/holdings/*.csv"),
         "top50_reports": dates_from_dir("reports/top50_*.csv"),
         "turnover_reports": dates_from_dir("reports/turnover_*.csv"),
