@@ -216,7 +216,7 @@
     <div style="height:100px;"><canvas id="trustBarChart"></canvas></div>
     <div style="margin:8px 0 2px;"><span class="badge">自營商買賣超(張)</span></div>
     <div style="height:100px;"><canvas id="dealerBarChart"></canvas></div>
-    <div style="margin:8px 0 2px;"><span class="badge">大戶比例增減(pp，週資料，時間軸較稀疏)</span></div>
+    <div style="margin:8px 0 2px;"><span class="badge">大戶持股比例趨勢(%，週資料，時間軸較稀疏)</span></div>
     <div style="height:110px;"><canvas id="bigHolderBarChart"></canvas></div>
   </div>
 
@@ -576,34 +576,63 @@ async function drawChipBarPanels(stockId) {
   return `共 ${labels.length} 個交易日`;
 }
 
-// ---------- 大戶比例增減（週資料，直式長條圖） ----------
+// ---------- 大戶持股比例趨勢（週資料，趨勢線，跟外資投信同軸對照） ----------
 
-async function drawBigHolderBarChart(stockId) {
+async function drawBigHolderTrendChart(stockId) {
   const weeks = manifest.holdings_dates.slice(-60);
-  if (weeks.length < 2) {
+  if (weeks.length === 0) {
     if (bigHolderBarChart) { bigHolderBarChart.destroy(); bigHolderBarChart = null; }
-    return weeks.length === 0 ? "尚無集保週資料" : "僅累積1週，無法算增減";
+    return "尚無集保週資料";
   }
-
-  const points = [];
-  for (const w of weeks) {
-    try {
-      const rows = await fetchCSV(`data/holdings/${w}.csv`);
-      points.push({ week: w, ...tierPercents(rows, stockId) });
-    } catch (e) { /* 忽略 */ }
-  }
-  if (points.length < 2) return "讀取失敗";
 
   const labels = [];
   const values = [];
-  for (let i = 1; i < points.length; i++) {
-    labels.push(points[i].week);
-    values.push(points[i].big - points[i - 1].big);
+  for (const w of weeks) {
+    try {
+      const rows = await fetchCSV(`data/holdings/${w}.csv`);
+      const { big } = tierPercents(rows, stockId);
+      labels.push(w);
+      values.push(big);
+    } catch (e) { /* 忽略 */ }
   }
+  if (labels.length === 0) return `找不到「${stockId}」的集保資料`;
 
-  bigHolderBarChart = makeBarChart("bigHolderBarChart", bigHolderBarChart, labels, values, { showXLabels: true });
+  if (bigHolderBarChart) bigHolderBarChart.destroy();
+  const ctx = document.getElementById("bigHolderBarChart").getContext("2d");
+  bigHolderBarChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        label: "大戶持股比例(%)",
+        data: values,
+        borderColor: "#ff6b6b",
+        backgroundColor: "rgba(255,107,107,0.12)",
+        fill: true,
+        tension: 0.25,
+        pointRadius: labels.length <= 12 ? 3 : 0,
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          ticks: { color: "#8b93a3", font: { size: 9.5 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 15 },
+          grid: { display: false },
+        },
+        y: {
+          ticks: { color: "#8b93a3", font: { size: 9.5 } },
+          grid: { color: "rgba(255,255,255,0.04)" },
+          title: { display: true, text: "持股比例(%)", color: "#8b93a3" },
+        },
+      },
+    },
+  });
 
-  return `共 ${labels.length} 週`;
+  return `共 ${labels.length} 週（水位趨勢，非週增減）`;
 }
 
 // ---------- 今日融資融券 ----------
@@ -727,7 +756,7 @@ async function queryStock(rawInput) {
   const [priceNote, institNote, holdingsNote, marginNote] = await Promise.all([
     drawPriceChart(stockId),
     drawChipBarPanels(stockId),
-    drawBigHolderBarChart(stockId),
+    drawBigHolderTrendChart(stockId),
     drawMarginStats(stockId),
   ]);
 
